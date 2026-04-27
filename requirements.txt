@@ -1,4 +1,6 @@
 numpy
+matplotlib
 xarray
-netCDF4
 cdsapi
+pyproj
+rasterio
