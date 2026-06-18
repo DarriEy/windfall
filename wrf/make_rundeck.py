@@ -121,7 +121,7 @@ NAMELIST_INPUT = """\
  grid_id = 1, 2, 3, parent_id = 1, 1, 2,
  i_parent_start = 1, 33, 30, j_parent_start = 1, 33, 30,
  parent_grid_ratio = 1, 3, 3, parent_time_step_ratio = 1, 3, 3,
- p_top_requested = 5000, num_metgrid_levels = 30,
+ p_top_requested = 5000, num_metgrid_levels = 33,
 /
 &physics
  mp_physics = 6, 6, 6, ra_lw_physics = 4, 4, 4, ra_sw_physics = 4, 4, 4,
@@ -152,12 +152,14 @@ def main():
     write_turbine_tbl(turb, HERE / 'wind-turbine-1.tbl')
     write_windturbines(latlons, HERE / 'windturbines.txt')
 
-    start, end = '2022-01-15_00:00:00', '2022-01-16_12:00:00'
+    # Strong sustained norðanátt at the start of Jan 2022 (mouth winds
+    # 18-21 m/s from the north, Jan 1 06:00 - Jan 2 06:00; see winds_2022_01).
+    start, end = '2022-01-01_00:00:00', '2022-01-02_12:00:00'
     (HERE / 'namelist.wps').write_text(NAMELIST_WPS.format(
         start=start, end=end, ref_lat=REF_LAT, ref_lon=REF_LON))
     (HERE / 'namelist.input').write_text(NAMELIST_INPUT.format(
-        run_hours=36, sy=2022, sm='01', sd=15, sh='00',
-        ey=2022, em='01', ed=16, eh=12))
+        run_hours=36, sy=2022, sm='01', sd='01', sh='00',
+        ey=2022, em='01', ed='02', eh=12))
 
     print(f'Run deck for {CONFIG} ({turb.name}): '
           f'{len(latlons)} turbines, hub {turb.hub_height:.0f} m, '

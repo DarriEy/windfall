@@ -1,6 +1,6 @@
 &share
- wrf_core = 'ARW', max_dom = 3, start_date = 3*'2022-01-15_00:00:00',
- end_date = 3*'2022-01-16_12:00:00', interval_seconds = 21600,
+ wrf_core = 'ARW', max_dom = 3, start_date = 3*'2022-01-01_00:00:00',
+ end_date = 3*'2022-01-02_12:00:00', interval_seconds = 21600,
 /
 &geogrid
  parent_id         = 1, 1, 2,

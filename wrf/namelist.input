@@ -1,7 +1,7 @@
 &time_control
  run_days = 0, run_hours = 36, run_minutes = 0,
- start_year  = 3*2022, start_month = 3*01, start_day = 3*15, start_hour = 3*00,
- end_year    = 3*2022, end_month   = 3*01, end_day   = 3*16, end_hour   = 3*12,
+ start_year  = 3*2022, start_month = 3*01, start_day = 3*01, start_hour = 3*00,
+ end_year    = 3*2022, end_month   = 3*01, end_day   = 3*02, end_hour   = 3*12,
  interval_seconds = 21600, input_from_file = 3*.true.,
  history_interval = 60, 60, 30, frames_per_outfile = 1000, 1000, 1000,
  restart = .false., io_form_history = 2, io_form_restart = 2,
@@ -14,7 +14,7 @@
  grid_id = 1, 2, 3, parent_id = 1, 1, 2,
  i_parent_start = 1, 33, 30, j_parent_start = 1, 33, 30,
  parent_grid_ratio = 1, 3, 3, parent_time_step_ratio = 1, 3, 3,
- p_top_requested = 5000, num_metgrid_levels = 30,
+ p_top_requested = 5000, num_metgrid_levels = 33,
 /
 &physics
  mp_physics = 6, 6, 6, ra_lw_physics = 4, 4, 4, ra_sw_physics = 4, 4, 4,

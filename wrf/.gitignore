@@ -1,0 +1,13 @@
+# Large downloads and run outputs (not version-controlled)
+geog/
+met/
+*.nc
+*.grib
+met_em.d0*
+GRIBFILE.*
+FILE:*
+geo_em.d0*
+wrfout_*
+wrfinput_*
+wrfbdy_*
+rsl.*
