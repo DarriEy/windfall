@@ -69,6 +69,11 @@ def sample_params(rng):
         'L': float(rng.uniform(30_000, 84_000)),
         'Lambda': float(np.clip(rng.normal(84_300, 18_000),
                                 55_000, 120_000)),
+        # Effective channeled-layer depth: from the rotor scale (~250 m)
+        # to the inversion-capped cold-airmass depth. 200 m is the shallow
+        # (optimistic-for-shielding) end. This is the largest single
+        # sensitivity (sensitivity.py), so it must be in the budget.
+        'H_eff': float(rng.uniform(200.0, 500.0)),
     }
 
 
@@ -95,7 +100,7 @@ def run_design(name, info, wb_k, wb_A, rng):
             continue
         s = sample_params(rng)
         wp = WakeParams(
-            effective_height=200, recovery_length=s['L'],
+            effective_height=s['H_eff'], recovery_length=s['L'],
             channeling_fraction=s['f'], baseline_length=s['Lambda'],
             superposition=s['superposition'])
         r = ChanneledWakeModel(EYJAFJORDUR, wp).simulate(
@@ -126,7 +131,7 @@ def main():
           f'{U_REF:.0f} m/s inflow)')
     print('=' * 78)
     print('  Sampling: superposition {product|sos}, f~U(0.45,0.92), '
-          'L~U(30,84)km, Λ~N(84,18)km')
+          'L~U(30,84)km, Λ~N(84,18)km, H_eff~U(200,500)m')
     print()
     print(f'  {"design":<12}{"marg Δu20 %":>22}{"marg ΔP20 %":>22}'
           f'{"LCOE":>10}')
@@ -145,9 +150,9 @@ def main():
               f'{dp[0]:>6.1f}{dp[1]:>7.1f}{dp[2]:>7.1f}  '
               f'{r["lcoe"]:>9.0f}')
     print()
-    print('  NB: the product/sos superposition split is the dominant')
-    print('  driver of the wide ΔP band — the model\'s default (product)')
-    print('  sits near the P90 optimistic edge.')
+    print('  NB: the wake-superposition rule and the channel depth H_eff')
+    print('  are the dominant drivers of the wide ΔP band; the model\'s')
+    print('  default (product, shallow H_eff) sits near the P90 edge.')
 
     _figure(results)
 
