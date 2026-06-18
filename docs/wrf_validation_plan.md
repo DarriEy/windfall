@@ -72,6 +72,24 @@ is the WRF/WPS build + DEM ingest, not the runs.
   study" framing into a validated result — the main thing a WES reviewer
   will ask for.
 
+## Status: container stood up and verified (2026-06-18)
+A working WRF+WPS is now running locally via Docker, sidestepping the
+GCC-15/macOS native-build fragility:
+- Image `sagunkayastha/wrf:latest` (tagged `windfall/wrf:4.3.3`),
+  `/BUILD_WRF`. **WRF V4.3.3** + WPS `geogrid`/`metgrid`.
+- **Verified executing under `linux/amd64` emulation on Apple Silicon**:
+  `wrf.exe` prints the `WRF V4.3.3 MODEL` banner and initializes (stops
+  only on absent met input, as expected). The Fitch wind-farm scheme
+  (`windfarm_opt`) is present in 4.3.3.
+- **Gaps to close before a run:** (i) `ungrib.exe` is not compiled —
+  `cd /BUILD_WRF/WPS && ./compile ungrib` (or a child Dockerfile) is
+  needed to ingest CARRA/ERA5 GRIB; (ii) the Docker VM has ~8 GB and runs
+  emulated, so it suits a **single small proof case**, not the full
+  multi-event 1-km validation (HPC, as above).
+- **Next step:** generate the Eyjafjörður run deck (namelist.wps with the
+  real DEM, namelist.input with `windfarm_opt=1`, and the Fitch turbine
+  table + locations from `designs.py`), then drive one norðanátt case.
+
 ## Key references
 Fitch et al. (2012, MWR) wind-farm parameterization; Fischereit et al. (2022,
 WES) mesoscale-wake validation; Ólafsson & Ágústsson (Icelandic channeled
