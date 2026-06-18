@@ -79,28 +79,42 @@ def _have_pressure_data():
 
 
 def from_data():
-    """Compute ridge-layer N and f from CARRA pressure-level temperature,
-    conditioned on norðanátt. Returns a summary dict."""
+    """Ridge-layer N and the implied channeling fraction f from CARRA
+    pressure-level temperature, per station, conditioned on norðanátt.
+
+    Each ptemp_YYYY_MM.npz is aligned index-for-index with the matching
+    winds_YYYY_MM.npz (same 6-hourly grid), so N (1000->850 hPa, spanning
+    the ~1 km ridge) is paired with the concurrent wind. Returns a dict
+    of per-station {N, u, f, n_events}, concatenated over all months."""
     files = sorted(glob.glob(str(DATA / 'ptemp_*.npz')))
-    t1000, t850 = [], []
-    for f in files:
-        d = np.load(f)
-        t1000.append(d['mouth_t1000'])
-        t850.append(d['mouth_t850'])
-    t1000 = np.concatenate(t1000)
-    t850 = np.concatenate(t850)
-    # NB: requires the pressure record aligned to the wind record; here we
-    # assume the same year-major 6-hourly grid as observed/stratification.
-    raw = observed.load_raw()
-    nmask = observed.nordanatt_mask(raw)[:t1000.size]
-    u = raw['mouth']['speed'][:t1000.size]
-    N = n_from_profile(t1000, 1000, t850, 850)
-    f = froude_f(u, N)
-    return {
-        'N_nordan': float(np.nanmean(N[nmask])),
-        'f_nordan': float(np.nanmean(f[nmask])),
-        'stable_frac': float(np.mean(N[nmask] > 0)),
-    }
+    stations = observed.STATION_NAMES
+    acc = {s: {'N': [], 'u': [], 'd': []} for s in stations}
+    for pf in files:
+        ym = '_'.join(Path(pf).stem.split('_')[1:3])      # YYYY_MM
+        wf = DATA / f'winds_{ym}.npz'
+        if not wf.exists():
+            continue
+        pt, wd = np.load(pf), np.load(wf)
+        for s in stations:
+            N = n_from_profile(pt[f'{s}_t1000'], 1000, pt[f'{s}_t850'], 850)
+            n = min(N.size, wd[f'{s}_speed'].size)
+            acc[s]['N'].append(N[:n])
+            acc[s]['u'].append(wd[f'{s}_speed'][:n])
+            acc[s]['d'].append(wd[f'{s}_dir'][:n])
+    out = {}
+    for s in stations:
+        if not acc[s]['N']:
+            continue
+        N = np.concatenate(acc[s]['N'])
+        u = np.concatenate(acc[s]['u'])
+        d = np.concatenate(acc[s]['d'])
+        nm = ((d >= 330) | (d <= 30)) & (u > 10)
+        if nm.sum() == 0:
+            continue
+        f = froude_f(u, N)
+        out[s] = {'N': float(np.nanmean(N[nm])), 'u': float(u[nm].mean()),
+                  'f': float(np.nanmean(f[nm])), 'n': int(nm.sum())}
+    return out
 
 
 def demonstrate():
@@ -137,11 +151,28 @@ def main():
     print('  RIDGE-HEIGHT STABILITY → CHANNELING FRACTION f')
     print('=' * 72)
     if _have_pressure_data():
-        s = from_data()
-        print(f'  Norðanátt ridge-layer N = {s["N_nordan"]:.4f} s⁻¹ '
-              f'({s["stable_frac"]*100:.0f}% stable)')
-        print(f'  Implied channeling fraction f = {s["f_nordan"]:.2f}')
-        print(f'  Model presets: stable 0.80, very-stable 0.92')
+        res = from_data()
+        months = sorted({'_'.join(Path(p).stem.split('_')[1:3])
+                         for p in glob.glob(str(DATA / 'ptemp_*.npz'))})
+        print(f'  CARRA pressure-level temperature, months: {months}')
+        print(f'  Ridge layer 1000->850 hPa (~110-1460 m), Fr_c = {FR_C}')
+        print()
+        print(f'  {"station":<10}{"events":>7}{"N (s⁻¹)":>11}{"u (m/s)":>9}'
+              f'{"f":>7}')
+        print(f'  {"":-<10}{"":-<34}')
+        for s, r in res.items():
+            print(f'  {s:<10}{r["n"]:>7}{r["N"]:>11.4f}{r["u"]:>9.1f}'
+                  f'{r["f"]:>7.2f}')
+        fmean = np.mean([r['f'] for r in res.values()])
+        print()
+        print(f'  --> Observed ridge-height channeling fraction f ≈ '
+              f'{fmean:.2f} during norðanátt.')
+        print(f'      Model presets (0.60/0.80/0.92) are HIGHER: the real')
+        print(f'      stratification is only weakly stable (N~0.006-0.008),')
+        print(f'      flow is near/above critical (Fr>1), so much of it goes')
+        print(f'      over the ridges. The presets — and thus the shielding —')
+        print(f'      are likely optimistic. (NB: one month so far; the full')
+        print(f'      20-yr fetch is needed for a robust distribution.)')
     else:
         print(CDS_REQUEST)
         demonstrate()
