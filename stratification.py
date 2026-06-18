@@ -29,6 +29,7 @@ assumes.
 
 import glob
 import math
+import os
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -56,10 +57,41 @@ def _temp_by_year():
     return by_year
 
 
+def _cache_valid(cache, sources):
+    """Valid only if the cache post-dates every source (wind + temp)
+    file and was built from the same number of them."""
+    if not cache.exists():
+        return False
+    try:
+        cmt = cache.stat().st_mtime
+        if any(os.path.getmtime(s) > cmt for s in sources):
+            return False
+        with np.load(cache) as d:
+            return int(d['n_sources']) == len(sources)
+    except Exception:
+        return False
+
+
 def load_aligned():
     """Wind (speed/dir) and temperature (t2m/skt) per station, time-
     aligned. Years are kept only when the wind and temperature record
     lengths match (same 6-hourly grid)."""
+    cache_file = DATA / 'cache_aligned_temp_wind.npz'
+    sources = (observed._files()
+               + sorted(glob.glob(str(DATA / 'temp_*_H*.npz'))))
+    if _cache_valid(cache_file, sources):
+        with np.load(cache_file, allow_pickle=True) as d:
+            used = list(d['used'])
+            out = {}
+            for s in STATIONS:
+                out[s] = {
+                    'speed': d[f'{s}_speed'].astype(float),
+                    'dir': d[f'{s}_dir'].astype(float),
+                    't2m': d[f'{s}_t2m'].astype(float),
+                    'skt': d[f'{s}_skt'].astype(float),
+                }
+            return out, used
+
     raw = observed.load_raw()
     years = raw['year']
     temp_by_year = _temp_by_year()
@@ -87,6 +119,21 @@ def load_aligned():
     for s in STATIONS:
         for k in out[s]:
             out[s][k] = np.concatenate(out[s][k]).astype(float)
+
+    # Save to cache (n_sources lets _cache_valid detect staleness if any
+    # wind or temperature source file changes).
+    try:
+        cache_data = {'used': np.array(used),
+                      'n_sources': np.int64(len(sources))}
+        for s in STATIONS:
+            cache_data[f'{s}_speed'] = out[s]['speed'].astype(np.float32)
+            cache_data[f'{s}_dir'] = out[s]['dir'].astype(np.float32)
+            cache_data[f'{s}_t2m'] = out[s]['t2m'].astype(np.float32)
+            cache_data[f'{s}_skt'] = out[s]['skt'].astype(np.float32)
+        np.savez_compressed(cache_file, **cache_data)
+    except Exception:
+        pass
+
     return out, used
 
 

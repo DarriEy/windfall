@@ -103,56 +103,66 @@ def extract_temperature(nc_file):
 
 def analyze_inversions():
     """Combine wind and temperature data to analyze inversions."""
-    # Load wind data
-    wind_files = sorted(DATA_DIR.glob('winds_*.npz'))
-    if not wind_files:
-        print('  No wind data available')
+    import stratification
+    import observed
+
+    try:
+        data, years = stratification.load_aligned()
+    except Exception as e:
+        print(f'  Failed to load aligned data: {e}')
+        # Fall back to NC file check if no NPZ data (for compatibility)
+        temp_files = sorted(DATA_DIR.glob('carra_temp_*.nc')) + \
+                     sorted(DATA_DIR.glob('_test_temp.nc'))
+        if not temp_files:
+            print('  No temperature data yet.')
+            print('  Run: python thermal_inversion.py --fetch --year 2022')
+            return
+        print(f'  Found {len(temp_files)} temperature file(s)')
+        # legacy flow ...
+        all_delta_t = {wp['name']: [] for wp in carra.WAYPOINTS}
+        for tf in temp_files:
+            try:
+                temps = extract_temperature(tf)
+                for wp in carra.WAYPOINTS:
+                    if temps[wp['name']]['delta_t'] is not None:
+                        all_delta_t[wp['name']].append(temps[wp['name']]['delta_t'])
+            except Exception as e:
+                print(f'    Error: {e}')
+        if not any(all_delta_t[wp['name']] for wp in carra.WAYPOINTS):
+            print('  No valid temperature data extracted')
+            return
+        mouth_dt = np.concatenate(all_delta_t['mouth']) if all_delta_t['mouth'] else None
+        if mouth_dt is None:
+            return
+        print(f'\n  Legacy Temperature inversion analysis (mouth):')
+        print(f'  Records: {len(mouth_dt)}')
+        print(f'  ΔT (T_2m - T_skin) mean: {np.mean(mouth_dt):.2f} K')
+        print(f'  Inversion (ΔT > 0): {(mouth_dt > 0).mean():.1%} of time')
         return
 
-    # Check for temperature files
-    temp_files = sorted(DATA_DIR.glob('carra_temp_*.nc')) + \
-                 sorted(DATA_DIR.glob('_test_temp.nc'))
-    if not temp_files:
-        print('  No temperature data yet.')
-        print('  Run: python thermal_inversion.py --fetch --year 2022')
-        print('  Or wait for background CARRA temp download.')
-        return
+    print(f'  Using aligned dataset ({years[0]}-{years[-1]}): {len(years)} years')
+    print()
+    print(f'  {"station":<12}{"subset":<12}{"mean dT":>13}{"inversion %":>13}{"strong inv %":>15}')
+    print(f'  {"":-<12}{"":-<12}{"":->13}{"":->13}{"":->15}')
 
-    print(f'  Found {len(temp_files)} temperature file(s)')
+    mouth = data['mouth']
+    nmask = (observed.is_northerly(mouth['dir'])
+             & (mouth['speed'] > observed.NORDANATT_MIN_SPEED))
 
-    all_delta_t = {wp['name']: [] for wp in carra.WAYPOINTS}
+    for wp in carra.WAYPOINTS:
+        name = wp['name']
+        st = data[name]
+        dT = st['t2m'] - st['skt']
 
-    for tf in temp_files:
-        print(f'  Processing {tf.name}...')
-        try:
-            temps = extract_temperature(tf)
-            for wp in carra.WAYPOINTS:
-                if temps[wp['name']]['delta_t'] is not None:
-                    all_delta_t[wp['name']].append(
-                        temps[wp['name']]['delta_t'])
-        except Exception as e:
-            print(f'    Error: {e}')
-            continue
-
-    # Combine with wind data for stability analysis
-    if not any(all_delta_t[wp['name']] for wp in carra.WAYPOINTS):
-        print('  No valid temperature data extracted')
-        return
-
-    mouth_dt = np.concatenate(all_delta_t['mouth']) \
-        if all_delta_t['mouth'] else None
-    if mouth_dt is None:
-        print('  No mouth temperature data')
-        return
-
-    print(f'\n  Temperature inversion analysis (mouth):')
-    print(f'  Records: {len(mouth_dt)}')
-    print(f'  ΔT (T_2m - T_skin) mean: {np.mean(mouth_dt):.2f} K')
-    print(f'  Inversion (ΔT > 0): {(mouth_dt > 0).mean():.1%} of time')
-    print(f'  Strong inversion (ΔT > 2K): {(mouth_dt > 2).mean():.1%}')
-
-    # TODO: correlate with norðanátt events once we have
-    # co-temporal wind + temperature data
+        for sub, mask in [('all', np.ones_like(nmask)), ('nordanatt', nmask)]:
+            sel_dT = dT[mask]
+            if sel_dT.size == 0:
+                continue
+            mean_dt = np.mean(sel_dT)
+            inv_pct = (sel_dT > 0).mean() * 100
+            strong_inv_pct = (sel_dT > 2.0).mean() * 100
+            print(f'  {name:<12}{sub:<12}{mean_dt:>12.2f} K{inv_pct:>12.1f}%{strong_inv_pct:>14.1f}%')
+        print()
 
 
 def fetch_temp(year=2022, months=None):

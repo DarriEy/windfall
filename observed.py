@@ -23,6 +23,8 @@ The station order down the fjord is mouth -> outer -> dalvik -> hrisey
 
 import glob
 import math
+import os
+import re
 import numpy as np
 from pathlib import Path
 
@@ -42,12 +44,36 @@ NORTH_SECTOR = (330, 30)      # degrees: dir >= 330 OR dir <= 30
 NORDANATT_MIN_SPEED = 10.0    # m/s at hub height
 
 
+# Monthly data files only: winds_YYYY_MM.npz. The strict pattern keeps
+# derived/cache files (e.g. cache_winds_concat.npz) out of the data set.
+_MONTHLY = re.compile(r'^winds_\d{4}_\d{2}\.npz$')
+_CACHE_FILE = DATA_DIR / 'cache_winds_concat.npz'
+
+
 def _files():
-    fs = sorted(glob.glob(str(DATA_DIR / 'winds_*.npz')))
+    fs = sorted(f for f in glob.glob(str(DATA_DIR / 'winds_*.npz'))
+                if _MONTHLY.match(Path(f).name))
     if not fs:
         raise FileNotFoundError(
-            f'No winds_*.npz files in {DATA_DIR}. Run carra.py first.')
+            f'No winds_YYYY_MM.npz files in {DATA_DIR}. Run carra.py first.')
     return fs
+
+
+def _cache_valid(cache, sources):
+    """Cache is valid only if it exists, post-dates every source file,
+    and was built from the same number of source files — so a changed,
+    added, or removed winds_*.npz invalidates it rather than serving
+    stale data silently."""
+    if not cache.exists():
+        return False
+    try:
+        cmt = cache.stat().st_mtime
+        if any(os.path.getmtime(s) > cmt for s in sources):
+            return False
+        with np.load(cache) as d:
+            return int(d['n_files']) == len(sources)
+    except Exception:
+        return False
 
 
 def load_raw():
@@ -58,6 +84,16 @@ def load_raw():
     shared ``year`` array (same length, aligned across stations).
     """
     fs = _files()
+    if _cache_valid(_CACHE_FILE, fs):
+        with np.load(_CACHE_FILE) as d:
+            out = {'year': d['year']}
+            for s in STATION_NAMES:
+                out[s] = {
+                    'speed': d[f'{s}_speed'].astype(float),
+                    'dir': d[f'{s}_dir'].astype(float),
+                }
+            return out
+
     speed = {s: [] for s in STATION_NAMES}
     direction = {s: [] for s in STATION_NAMES}
     years = []
@@ -75,6 +111,18 @@ def load_raw():
             'speed': np.concatenate(speed[s]).astype(float),
             'dir': np.concatenate(direction[s]).astype(float),
         }
+
+    # Save to cache (float32 is lossless here — the source npz are
+    # already float32). n_files lets _cache_valid detect staleness.
+    try:
+        cache_data = {'year': out['year'], 'n_files': np.int64(len(fs))}
+        for s in STATION_NAMES:
+            cache_data[f'{s}_speed'] = out[s]['speed'].astype(np.float32)
+            cache_data[f'{s}_dir'] = out[s]['dir'].astype(np.float32)
+        np.savez_compressed(_CACHE_FILE, **cache_data)
+    except Exception:
+        pass
+
     return out
 
 
