@@ -13,6 +13,7 @@ papers/
 
 # Paper/docx generators and utilities
 make_*.py
+!wrf/make_rundeck.py
 paper_figures.py
 analyze.py
 fetch_dem.py
