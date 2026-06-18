@@ -145,6 +145,66 @@ def fetch(year=2022, months=None, chunk_months=6):
     return extracted
 
 
+def fetch_pressure_temp(year=2022, months=None, levels=(1000, 925, 850)):
+    """Download CARRA pressure-level temperature and extract it at the
+    fjord waypoints to data/ptemp_YYYY_HX.npz (keys <station>_t<level>),
+    for the ridge-height stability analysis (ridge_stability.py).
+
+    Mirrors fetch(): download a chunk, extract the 7 waypoints across the
+    requested pressure levels, discard the bulk file. Requires CDS
+    credentials (see fetch())."""
+    import cdsapi
+    import xarray as xr
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if months is None:
+        months = list(range(1, 13))
+    if not _has_credentials():
+        raise SystemExit('CDS credentials not found (see fetch()).')
+
+    client = cdsapi.Client()
+    halves = {'H1': [m for m in months if m <= 6],
+              'H2': [m for m in months if m > 6]}
+    for half, mns in halves.items():
+        if not mns:
+            continue
+        out = DATA_DIR / f'ptemp_{year}_{half}.npz'
+        if out.exists():
+            print(f"  Already have {out.name}")
+            continue
+        bulk = DATA_DIR / f'_pbulk_{year}_{half}.nc'
+        print(f"  Fetching pressure temp {year} {half}...", flush=True)
+        client.retrieve('reanalysis-carra-pressure-levels', {
+            'variable': 'temperature',
+            'pressure_level': [str(p) for p in levels],
+            'product_type': 'analysis', 'leadtime_hour': '0',
+            'year': str(year), 'month': [f'{m:02d}' for m in mns],
+            'day': [f'{d:02d}' for d in range(1, 32)],
+            'time': ['00:00', '06:00', '12:00', '18:00'],
+            'domain': 'west_domain', 'data_format': 'netcdf'}, str(bulk))
+        ds = _open_dataset(bulk)
+        tname = next(n for n in ds.data_vars if 't' in n.lower())
+        lat_c = [c for c in ds.coords if 'lat' in c.lower()][0]
+        lon_c = [c for c in ds.coords if 'lon' in c.lower()][0]
+        lev_c = [c for c in (list(ds.coords) + list(ds.dims))
+                 if 'level' in c.lower() or 'pressure' in c.lower()][0]
+        lat, lon, lev = ds[lat_c].values, ds[lon_c].values, ds[lev_c].values
+        spatial = [d for d in ds[tname].dims
+                   if d not in TIME_DIMS and d != lev_c]
+        arrays = {}
+        for wp in WAYPOINTS:
+            i, j = _find_nearest(lat, lon, wp['lat'], wp['lon'])
+            for p in levels:
+                li = int(np.argmin(np.abs(lev - p)))
+                t = ds[tname].isel(
+                    {lev_c: li, spatial[0]: i, spatial[1]: j}).values.flatten()
+                arrays[f"{wp['name']}_t{p}"] = t.astype(np.float32)
+        ds.close()
+        np.savez_compressed(out, **arrays)
+        bulk.unlink()
+        print(f"  Saved {out.name}")
+
+
 def fetch_range(start=2010, end=2022):
     """Download CARRA data for a range of years."""
     print(f"  Fetching CARRA {start}-{end} ({end - start + 1} years)...")
