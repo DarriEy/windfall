@@ -309,18 +309,59 @@ class ChanneledWakeModel:
                 (1 - u[ti] / u_base[ti]) * 100, 2) if u_base[ti] > 0 else 0.0
         return result
 
-    def aep(self, rows, weibull_k=2.0, weibull_A=9.0, hours=8766):
+    @staticmethod
+    def _weibull_pdf(u, k, A):
+        return (k / A) * (u / A) ** (k - 1) * np.exp(-(u / A) ** k)
+
+    def aep(self, rows, weibull_k=2.0, weibull_A=9.0, hours=8766,
+            station_weibull=None):
+        """Annual energy production.
+
+        Default: drive the farm with the mouth Weibull (weibull_k/A) and
+        let the calibrated baseline decay the inflow down-fjord — this
+        keeps the mouth *shape* everywhere.
+
+        station_weibull (a callable x_position_m -> (k, A)): use each
+        turbine's own local resource distribution instead. The natural
+        down-fjord decay is then carried by the per-station A, so the
+        baseline decay is switched OFF for the energy integral (using it
+        too would double-count the decay) and only the turbine-to-turbine
+        array wake is applied.
+        """
         u_bins = np.arange(0.5, 36.0, 1.0)
-        pdf = ((weibull_k / weibull_A)
-               * (u_bins / weibull_A) ** (weibull_k - 1)
-               * np.exp(-(u_bins / weibull_A) ** weibull_k))
-        total = 0.0
-        for ub, p in zip(u_bins, pdf):
-            if p < 1e-8 or ub < 2:
-                continue
-            res = self.simulate(rows, float(ub))
-            total += sum(r['mw_total'] for r in res['rows']) * hours * float(p)
         cap = sum(r.capacity_mw for r in rows)
+
+        if station_weibull is None:
+            pdf = self._weibull_pdf(u_bins, weibull_k, weibull_A)
+            total = 0.0
+            for ub, p in zip(u_bins, pdf):
+                if p < 1e-8 or ub < 2:
+                    continue
+                res = self.simulate(rows, float(ub))
+                total += sum(r['mw_total']
+                             for r in res['rows']) * hours * float(p)
+        else:
+            # Array wake only (baseline off): row i's waked speed at an
+            # ambient ub is ub * array_factor_i. Each row's ambient is
+            # drawn from its own local Weibull.
+            from dataclasses import replace
+            flat = ChanneledWakeModel(
+                self.fjord, replace(self.params, baseline_length=None))
+            srows = sorted(rows, key=lambda r: r.x_position)
+            total = 0.0
+            for ub in u_bins:
+                if ub < 2:
+                    continue
+                res = flat.simulate(srows, float(ub))
+                for row, rd in zip(srows, res['rows']):
+                    k_r, A_r = station_weibull(row.x_position)
+                    p = self._weibull_pdf(ub, k_r, A_r)
+                    if p < 1e-8:
+                        continue
+                    waked = rd['u_ms']          # ub * array attenuation
+                    pw = float(row.turbine.power(np.array([waked]))[0])
+                    total += pw * row.n_turbines * hours * float(p)
+
         cf = total / (cap * hours) if cap > 0 else 0
         return {
             'aep_gwh': round(total / 1000, 1),

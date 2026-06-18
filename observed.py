@@ -22,6 +22,7 @@ The station order down the fjord is mouth -> outer -> dalvik -> hrisey
 """
 
 import glob
+import math
 import numpy as np
 from pathlib import Path
 
@@ -119,6 +120,53 @@ def along_fjord_profile(raw, mask=None):
         'interannual_std': np.array(inter_std),
         'n': np.array(ns),
     }
+
+
+def _fit_weibull(speeds):
+    """Weibull (k, A) by the coefficient-of-variation method (same as
+    carra._fit_weibull) so the per-station shape matches the pipeline."""
+    s = speeds[speeds > 0.1]
+    if s.size < 20:
+        return 2.0, 1.0
+    mean = float(np.mean(s))
+    std = float(np.std(s))
+    if mean <= 0 or std <= 0:
+        return 2.0, mean or 1.0
+    k = (std / mean) ** -1.086
+    k = max(1.2, min(k, 8.0))
+    A = mean / math.gamma(1 + 1 / k)
+    return round(k, 3), round(A, 3)
+
+
+def station_weibull_params(raw=None, mask=None):
+    """Fit a Weibull (k, A) to each station's hub-height speed from the
+    raw records — the true per-station resource *shape*, not the
+    mouth shape scaled by a decay factor."""
+    if raw is None:
+        raw = load_raw()
+    out = {}
+    for i, s in enumerate(STATION_NAMES):
+        sp = raw[s]['speed']
+        if mask is not None:
+            sp = sp[mask]
+        k, A = _fit_weibull(sp)
+        out[s] = {'k': k, 'A': A, 'x_km': float(STATION_X_KM[i])}
+    return out
+
+
+def weibull_callable(params=None):
+    """Return f(x_position_m) -> (k, A) using the nearest station's fit.
+    Pass to model.ChanneledWakeModel.aep(..., station_weibull=f)."""
+    if params is None:
+        params = station_weibull_params()
+    xs = np.array([params[s]['x_km'] for s in STATION_NAMES])
+    ks = np.array([params[s]['k'] for s in STATION_NAMES])
+    As = np.array([params[s]['A'] for s in STATION_NAMES])
+
+    def f(x_m):
+        i = int(np.argmin(np.abs(xs - x_m / 1000.0)))
+        return float(ks[i]), float(As[i])
+    return f
 
 
 if __name__ == '__main__':

@@ -88,6 +88,36 @@ def test_baseline_matches_calibration():
     assert abs(r['baseline_u'] - expected) < 0.05
 
 
+def test_per_station_weibull_gradient():
+    # Resource weakens down-fjord: A falls from mouth to head.
+    import observed
+    p = observed.station_weibull_params()
+    assert p['mouth']['A'] > p['akureyri']['A']
+    assert p['mouth']['A'] > 8 and p['akureyri']['A'] < 7
+
+
+def test_per_station_shrinks_shielding_premium():
+    # With each turbine at its true local resource, the JAFNVAEGI-vs-ORKA
+    # LCOE premium is small (a few $/MWh), not the ~$21 of the
+    # single-exponential-decay intermediate.
+    dj = eval_design('C) JAFNVAEGI', DESIGNS['C) JAFNVAEGI'],
+                     EYJAFJORDUR, _WK, _WA)
+    do = eval_design('B) ORKA', DESIGNS['B) ORKA'], EYJAFJORDUR, _WK, _WA)
+    assert 0 <= dj['lcoe'] - do['lcoe'] < 10
+
+
+def test_stratification_nordanatt_surface_unstable():
+    # Over the warm fjord mouth, norðanátt surface layers are
+    # predominantly unstable (cold air over warm sea).
+    import stratification, observed
+    data, _ = stratification.load_aligned()
+    mouth = data['mouth']
+    nmask = (observed.is_northerly(mouth['dir'])
+             & (mouth['speed'] > observed.NORDANATT_MIN_SPEED))
+    N = stratification.brunt_vaisala(mouth['t2m'], mouth['skt'])
+    assert (N[nmask] < 0).mean() > 0.8     # mostly unstable
+
+
 def test_all_designs_eval():
     # Every named design (monolithic and clustered) evaluates cleanly.
     for name, info in DESIGNS.items():

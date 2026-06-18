@@ -22,6 +22,19 @@ from model import (
     load_calibrated_baseline,
 )
 import carra
+import observed
+
+# Per-station Weibull resource (fitted once from raw CARRA records), used
+# for AEP so each turbine sees its true local distribution shape rather
+# than the mouth shape scaled by the baseline decay.
+_STATION_WEIBULL = None
+
+
+def station_weibull():
+    global _STATION_WEIBULL
+    if _STATION_WEIBULL is None:
+        _STATION_WEIBULL = observed.weibull_callable()
+    return _STATION_WEIBULL
 
 
 # ── Shared constants ──────────────────────────────────────────────
@@ -260,9 +273,8 @@ def eval_design(name, info, fjord, wb_k, wb_A):
     else:
         m_aep = ChanneledWakeModel(fjord, WakeParams(
             effective_height=200, recovery_length=30_000,
-            channeling_fraction=0.7,
-            baseline_length=load_calibrated_baseline()))
-        aep = m_aep.aep(rows, weibull_k=wb_k, weibull_A=wb_A)
+            channeling_fraction=0.7))
+        aep = m_aep.aep(rows, station_weibull=station_weibull())
     lcoe = annual_cost / (aep['aep_gwh'] * 1000) if aep['aep_gwh'] > 0 else 9999
 
     # Wind reduction under each stability regime

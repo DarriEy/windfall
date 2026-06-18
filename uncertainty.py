@@ -75,31 +75,36 @@ def sample_params(rng):
 def run_design(name, info, wb_k, wb_A, rng):
     rows, capex_m, annual = _rows_and_cost(name, info)
     is_onshore = info.get('_is_onshore', False)
-    du, dp, lcoe = [], [], []
+
+    # LCOE is a single best estimate: AEP comes from the per-station
+    # Weibull resource and is independent of the sampled wake parameters
+    # (those move the shielding, not the energy), so it is not in the MC.
+    if is_onshore:
+        lcoe = annual / (info.get('_aep_gwh', 1175) * 1e6)
+    else:
+        from designs import station_weibull
+        m0 = ChanneledWakeModel(EYJAFJORDUR, WakeParams(200, 30_000, 0.7))
+        aep = m0.aep(rows, station_weibull=station_weibull())
+        lcoe = annual / (aep['aep_gwh'] * 1000) if aep['aep_gwh'] > 0 else np.nan
+
+    du, dp = [], []
     for _ in range(N_DRAWS):
+        if is_onshore:
+            du.append(0.0)
+            dp.append(0.0)
+            continue
         s = sample_params(rng)
         wp = WakeParams(
             effective_height=200, recovery_length=s['L'],
             channeling_fraction=s['f'], baseline_length=s['Lambda'],
             superposition=s['superposition'])
-        m = ChanneledWakeModel(EYJAFJORDUR, wp)
-        if is_onshore:
-            du.append(0.0)
-            dp.append(0.0)
-        else:
-            r = m.simulate(rows, U_REF, target_x=AKUREYRI)
-            ub = r['baseline_u']
-            du.append(r['turbine_reduction_pct'])
-            dp.append((1 - (r['target_u'] / ub) ** 2) * 100 if ub > 0 else 0)
-        if is_onshore:
-            # onshore resource handled in designs.py; approximate AEP here
-            lcoe.append(annual / (info.get('_aep_gwh', 1175) * 1e6))
-        else:
-            aep = m.aep(rows, weibull_k=wb_k, weibull_A=wb_A)
-            lcoe.append(annual / (aep['aep_gwh'] * 1000)
-                        if aep['aep_gwh'] > 0 else np.nan)
+        r = ChanneledWakeModel(EYJAFJORDUR, wp).simulate(
+            rows, U_REF, target_x=AKUREYRI)
+        ub = r['baseline_u']
+        du.append(r['turbine_reduction_pct'])
+        dp.append((1 - (r['target_u'] / ub) ** 2) * 100 if ub > 0 else 0)
     return {'du': np.array(du), 'dp': np.array(dp),
-            'lcoe': np.array(lcoe), 'capex_m': capex_m}
+            'lcoe': lcoe, 'capex_m': capex_m}
 
 
 def pcts(a):
@@ -124,21 +129,21 @@ def main():
           'L~U(30,84)km, Λ~N(84,18)km')
     print()
     print(f'  {"design":<12}{"marg Δu20 %":>22}{"marg ΔP20 %":>22}'
-          f'{"LCOE $/MWh":>20}')
+          f'{"LCOE":>10}')
     print(f'  {"":<12}{"P10  P50  P90":>22}{"P10  P50  P90":>22}'
-          f'{"P10  P50  P90":>20}')
-    print(f'  {"":-<12}{"":->22}{"":->22}{"":->20}')
+          f'{"$/MWh":>10}')
+    print(f'  {"":-<12}{"":->22}{"":->22}{"":->10}')
     for name in targets:
         if name not in DESIGNS:
             continue
         r = run_design(name, DESIGNS[name], wb_k, wb_A, rng)
         results[name] = r
-        du, dp, lc = pcts(r['du']), pcts(r['dp']), pcts(r['lcoe'])
+        du, dp = pcts(r['du']), pcts(r['dp'])
         short = name.split(')')[1].strip()
         print(f'  {short:<12}'
               f'{du[0]:>6.1f}{du[1]:>7.1f}{du[2]:>7.1f}  '
               f'{dp[0]:>6.1f}{dp[1]:>7.1f}{dp[2]:>7.1f}  '
-              f'{lc[0]:>6.0f}{lc[1]:>7.0f}{lc[2]:>7.0f}')
+              f'{r["lcoe"]:>9.0f}')
     print()
     print('  NB: the product/sos superposition split is the dominant')
     print('  driver of the wide ΔP band — the model\'s default (product)')
@@ -168,21 +173,21 @@ def _figure(results):
     ax1.set_title('Shielding uncertainty', fontsize=12, fontweight='bold')
     ax1.grid(True, alpha=0.2, axis='y')
 
-    # Right: LCOE bands
+    # Right: best-estimate LCOE (per-station resource; deterministic)
     for i, n in enumerate(names):
         short = n.split(')')[1].strip()
-        p = np.percentile(results[n]['lcoe'][np.isfinite(results[n]['lcoe'])],
-                          [10, 50, 90])
         c = colors.get(short, '#555')
-        ax2.plot([i, i], [p[0], p[2]], color=c, lw=3, solid_capstyle='round')
-        ax2.plot(i, p[1], 'o', color=c, ms=10, zorder=5)
+        ax2.bar(i, results[n]['lcoe'], color=c, alpha=0.8, width=0.6)
+        ax2.annotate(f"${results[n]['lcoe']:.0f}", (i, results[n]['lcoe']),
+                     textcoords='offset points', xytext=(0, 3),
+                     ha='center', fontsize=9)
     ax2.set_xticks(range(len(names)))
     ax2.set_xticklabels(shorts, fontsize=10)
-    ax2.set_ylabel('LCOE ($/MWh) — P10–P90', fontsize=10)
-    ax2.set_title('Cost uncertainty', fontsize=12, fontweight='bold')
+    ax2.set_ylabel('LCOE ($/MWh), per-station resource', fontsize=10)
+    ax2.set_title('Best-estimate cost', fontsize=12, fontweight='bold')
     ax2.grid(True, alpha=0.2, axis='y')
 
-    fig.suptitle('Monte-Carlo uncertainty: marginal shielding and LCOE '
+    fig.suptitle('Monte-Carlo shielding uncertainty + best-estimate LCOE '
                  f'({N_DRAWS} draws)', fontsize=12.5, fontweight='bold')
     plt.tight_layout()
     OUT.mkdir(exist_ok=True)

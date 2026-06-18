@@ -4,9 +4,9 @@
 """Zone-specific placement classification and differential CAPEX."""
 
 import numpy as np
-from designs import DESIGNS, EYJAFJORDUR, rows_of
+from designs import DESIGNS, EYJAFJORDUR, rows_of, station_weibull
 from model import (WakeParams, ChanneledWakeModel, STABILITY_PRESETS,
-                   load_calibrated_baseline, marginal_reduction)
+                   marginal_reduction)
 import carra
 
 PLACEMENT = {
@@ -91,9 +91,8 @@ def main():
         blended = total_capex / (total_cap * 1000)
         annual = total_capex * CRF + total_opex
 
-        m = ChanneledWakeModel(EYJAFJORDUR, WakeParams(
-            200, 30_000, 0.7, baseline_length=load_calibrated_baseline()))
-        aep = m.aep(rows, weibull_k=wb_k, weibull_A=wb_A)
+        m = ChanneledWakeModel(EYJAFJORDUR, WakeParams(200, 30_000, 0.7))
+        aep = m.aep(rows, station_weibull=station_weibull())
         lcoe = annual / (aep['aep_gwh'] * 1000) if aep['aep_gwh'] > 0 else 999
 
         orig_kw = info['capex_kw']

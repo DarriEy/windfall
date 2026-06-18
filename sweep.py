@@ -20,6 +20,7 @@ from model import (
     Constriction, STABILITY_PRESETS,
 )
 import carra
+import observed
 
 
 # ── Turbine catalog ───────────────────────────────────────────────
@@ -141,13 +142,14 @@ HH_KWH = 25_000
 RETAIL_ISK = 17  # ISK/kWh
 
 
-def evaluate(config, model, wb_k, wb_A):
+def evaluate(config, model, wb_k, wb_A, station_weibull=None):
     rows = config['rows']
     n_total = sum(r.n_turbines for r in rows)
     cap = sum(r.capacity_mw for r in rows)
     turb_key = config['turbine_key']
 
-    aep = model.aep(rows, weibull_k=wb_k, weibull_A=wb_A)
+    aep = model.aep(rows, weibull_k=wb_k, weibull_A=wb_A,
+                    station_weibull=station_weibull)
     capex_m = cap * CAPEX_PER_KW[turb_key] / 1000
     annual_cost = (cap * 1000 * CAPEX_PER_KW[turb_key] * CRF
                    + cap * 1000 * OPEX_PER_KW_YR)
@@ -314,7 +316,9 @@ def main():
 
     print()
     print(f'  Evaluating {len(configs)} configs...', flush=True)
-    results = [evaluate(c, model, wb_k, wb_A) for c in configs]
+    swf = observed.weibull_callable()
+    results = [evaluate(c, model, wb_k, wb_A, station_weibull=swf)
+               for c in configs]
     print(f'  Done.')
 
     print_ranked(results, 'du20',
