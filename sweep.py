@@ -162,6 +162,18 @@ def evaluate(config, model, wb_k, wb_A):
     r12 = model.simulate(rows, 12.0, target_x=AKUREYRI_X)
     r20 = model.simulate(rows, 20.0, target_x=AKUREYRI_X)
 
+    # Marginal turbine-induced reduction, on top of the natural fjord
+    # baseline (which the calibrated model reproduces). Pressure scales
+    # as u^2, both measured against the no-turbine baseline at Akureyri.
+    def _du(r):
+        return r.get('turbine_reduction_pct', r['reduction_pct'])
+
+    def _dp(r):
+        ub = r.get('baseline_u', r['u_in'])
+        return round((1 - (r['target_u'] / ub) ** 2) * 100, 1) if ub > 0 \
+            else 0.0
+
+    du20 = _du(r20)
     return {
         'label': config['label'],
         'turb': turb_key,
@@ -174,11 +186,12 @@ def evaluate(config, model, wb_k, wb_A):
         'cf': aep['cf_pct'],
         'capex_m': round(capex_m),
         'lcoe': round(lcoe),
-        'du12': r12['reduction_pct'],
-        'dp12': round((1 - (r12['target_u'] / 12.0) ** 2) * 100, 1),
-        'du20': r20['reduction_pct'],
-        'dp20': round((1 - (r20['target_u'] / 20.0) ** 2) * 100, 1),
-        'du20_per_bn': round(r20['reduction_pct'] / (capex_m / 1000), 2)
+        'natural_du20': r20.get('natural_reduction_pct', 0.0),
+        'du12': _du(r12),
+        'dp12': _dp(r12),
+        'du20': du20,
+        'dp20': _dp(r20),
+        'du20_per_bn': round(du20 / (capex_m / 1000), 2)
         if capex_m > 0 else 0,
         'isk_kwh': round(surcharge_isk, 1),
         'hh_kisk': round(hh_kisk),
@@ -269,8 +282,10 @@ def print_header(n_configs, clim):
     print(f'  Wind data: {src}'
           + (f' ({n_yr} years)' if n_yr else ''))
     print()
-    print(f'  du12/du20 = speed reduction at Akureyri for 12/20 m/s')
-    print(f'  dP20 = pressure reduction at 20 m/s (force ~ u^2)')
+    print(f'  du12/du20 = TURBINE-induced speed reduction at Akureyri for')
+    print(f'              12/20 m/s, marginal on top of natural sheltering')
+    print(f'  dP20 = turbine pressure reduction at 20 m/s (force ~ u^2),')
+    print(f'         both measured against the no-turbine fjord baseline')
 
 
 # ── main ──────────────────────────────────────────────────────────

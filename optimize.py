@@ -27,8 +27,9 @@ from typing import List
 from model import (
     TurbineSpec, FjordGeometry, TurbineRow, WakeParams,
     ChanneledWakeModel, Constriction, STABILITY_PRESETS,
+    marginal_reduction,
 )
-from designs import EYJAFJORDUR, AKUREYRI
+from designs import EYJAFJORDUR, AKUREYRI, rows_of, design_cost
 import carra
 
 OUT = Path('figures')
@@ -224,24 +225,23 @@ def main():
     from designs import DESIGNS
     for dname, info in DESIGNS.items():
         short = dname.split(')')[1].strip()
-        rows = info['rows']
+        rows = rows_of(info)
         aep_gwh, cf = site_aep(rows, spatial)
-        cap = sum(r.capacity_mw for r in rows)
-        capex_kw = info['capex_kw']
-        annual = cap * 1000 * capex_kw * CRF + cap * 1000 * OPEX
+        cap, _, _, _, annual = design_cost(dname, info)
         lcoe = annual / (aep_gwh * 1000) if aep_gwh > 0 else 999
 
         m_s = ChanneledWakeModel(EYJAFJORDUR, STABILITY_PRESETS['stable'])
         r20 = m_s.simulate(rows, 20.0, target_x=AKUREYRI)
-        dp20 = (1 - (r20['target_u'] / 20.0) ** 2) * 100
+        du20, dp20 = marginal_reduction(r20)   # turbine-only, vs baseline
+        turb = info.get('turbine') or rows[0].turbine
 
         configs.append({
             'name': f'{short} (original)',
-            'turb': info['turbine'].name,
-            'hub': info['turbine'].hub_height,
+            'turb': turb.name,
+            'hub': turb.hub_height,
             'n': sum(r.n_turbines for r in rows),
             'mw': cap, 'aep': aep_gwh, 'cf': cf * 100,
-            'lcoe': lcoe, 'du20s': r20['reduction_pct'], 'dp20s': dp20,
+            'lcoe': lcoe, 'du20s': du20, 'dp20s': dp20,
         })
 
     # New optimized variants
@@ -283,7 +283,7 @@ def main():
 
         m_s = ChanneledWakeModel(EYJAFJORDUR, STABILITY_PRESETS['stable'])
         r20 = m_s.simulate(rows, 20.0, target_x=AKUREYRI)
-        dp20 = (1 - (r20['target_u'] / 20.0) ** 2) * 100
+        du20, dp20 = marginal_reduction(r20)   # turbine-only, vs baseline
 
         configs.append({
             'name': name,
@@ -291,7 +291,7 @@ def main():
             'hub': turb.hub_height,
             'n': sum(r.n_turbines for r in rows),
             'mw': cap, 'aep': aep_gwh, 'cf': cf * 100,
-            'lcoe': lcoe, 'du20s': r20['reduction_pct'], 'dp20s': dp20,
+            'lcoe': lcoe, 'du20s': du20, 'dp20s': dp20,
         })
 
     # Sort by LCOE

@@ -17,6 +17,7 @@ Multiple rows compound -- each sees the reduced inflow from upstream.
 """
 
 import numpy as np
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict
 
@@ -123,22 +124,101 @@ class WakeParams:
     recovery_length: float = 30_000.0
     channeling_fraction: float = 0.7
     high_thrust: bool = False
+    # Calibrated frictional-decay baseline (see calibrate.py). When
+    # baseline_length is set, the no-turbine flow decays down-fjord as
+    # u_base(x) = u_in * exp(-(x - anchor)+ / baseline_length), matching
+    # the observed CARRA along-fjord profile. Turbine deficits are then
+    # applied as a perturbation on top of this baseline, so the reported
+    # "turbine reduction" is the marginal effect, separate from the large
+    # natural sheltering the fjord already provides.
+    baseline_length: Optional[float] = None     # m; None -> flat baseline
+    baseline_anchor: float = 10_000.0            # m; outer-fjord wind peak
+    # Multi-row wake-deficit combination. 'product' compounds deficits
+    # multiplicatively (each row sees the reduced inflow from upstream);
+    # 'sos' combines them in quadrature (Katic/Jensen sum-of-squares,
+    # each row referenced to the local baseline). The two bracket a real
+    # structural uncertainty and are compared in uncertainty.py.
+    superposition: str = 'product'
+
+
+# Natural momentum-decay length of Eyjafjordur from calibrate.py
+# (CARRA 2003-2022): ~84 km under nordanatt, ~88 km all-conditions.
+# This is the physical ceiling on the turbine wake-recovery length.
+CALIBRATED_BASELINE_LENGTH = 84_300.0  # m (nordanatt fit)
+CALIBRATED_BASELINE_ANCHOR = 10_000.0  # m (outer-fjord wind peak)
+CALIBRATION_FILE = Path(__file__).parent / 'data' / 'baseline_calibration.json'
+
+
+def load_calibration(profile='nordanatt'):
+    """Calibrated baseline parameters as a dict with keys 'length' (m),
+    'anchor' (m) and 'source' (provenance string).
+
+    Fails *loudly*: if the calibration file is missing, it warns and
+    falls back to the hard-coded defaults (so a stale checkout still
+    runs, but the user is told). If the file is present but malformed or
+    missing the requested profile, the underlying exception propagates —
+    a bad file is never silently treated as a valid calibrated run.
+    """
+    import json
+    import warnings
+    if not CALIBRATION_FILE.exists():
+        warnings.warn(
+            f'Calibration file {CALIBRATION_FILE.name} not found; using '
+            f'hard-coded Lambda={CALIBRATED_BASELINE_LENGTH/1000:.0f} km, '
+            f'anchor={CALIBRATED_BASELINE_ANCHOR/1000:.0f} km. '
+            f'Run `python calibrate.py` to regenerate.', stacklevel=2)
+        return {'length': CALIBRATED_BASELINE_LENGTH,
+                'anchor': CALIBRATED_BASELINE_ANCHOR,
+                'source': 'hard-coded default (no calibration file)'}
+    with open(CALIBRATION_FILE) as fh:
+        cal = json.load(fh)                 # malformed JSON -> raises
+    prof = cal['profiles'][profile]         # missing profile -> raises
+    return {
+        'length': prof['lambda_km'] * 1000.0,
+        'anchor': prof.get('anchor_x_km', 10.0) * 1000.0,
+        'source': f"{cal.get('source', '?')} [{profile}: "
+                  f"Lambda={prof['lambda_km']}km, R2={prof.get('r2')}]",
+    }
+
+
+def load_calibrated_baseline(profile='nordanatt'):
+    """Calibrated baseline decay length in metres (back-compat shim)."""
+    return load_calibration(profile)['length']
+
+
+def marginal_reduction(result):
+    """(speed_pct, pressure_pct) reduction attributable to the turbines,
+    measured against the no-turbine baseline at the target — the honest
+    'turbine benefit'. Use this instead of recomputing against u_in,
+    which would also count the fjord's natural sheltering."""
+    ub = result.get('baseline_u', result['u_in'])
+    ut = result['target_u']
+    sr = result.get('turbine_reduction_pct',
+                    (1 - ut / result['u_in']) * 100 if result['u_in'] else 0)
+    pr = (1 - (ut / ub) ** 2) * 100 if ub > 0 else 0.0
+    return sr, pr
 
 
 # Atmospheric stability determines both vertical mixing rate and
 # terrain channeling strength. Stable stratification (common during
 # nordanatt) suppresses mixing and traps flow in the fjord, so wakes
 # persist much longer and wind reduction at Akureyri is amplified.
+_CAL = load_calibration()
+_BASE = _CAL['length']
+_ANCHOR = _CAL['anchor']
 STABILITY_PRESETS: Dict[str, WakeParams] = {
     'neutral': WakeParams(
         effective_height=200, recovery_length=30_000,
-        channeling_fraction=0.60),
+        channeling_fraction=0.60,
+        baseline_length=_BASE, baseline_anchor=_ANCHOR),
     'stable': WakeParams(
         effective_height=200, recovery_length=55_000,
-        channeling_fraction=0.80),
+        channeling_fraction=0.80,
+        baseline_length=_BASE, baseline_anchor=_ANCHOR),
     'very_stable': WakeParams(
         effective_height=200, recovery_length=80_000,
-        channeling_fraction=0.92),
+        channeling_fraction=0.92,
+        baseline_length=_BASE, baseline_anchor=_ANCHOR),
 }
 
 
@@ -152,25 +232,51 @@ class ChanneledWakeModel:
                  dx: float = 100.0, target_x: float = None) -> dict:
         n = int(self.fjord.length / dx) + 1
         x = np.linspace(0, self.fjord.length, n)
-        u = np.full(n, float(u_in))
+        # Natural (no-turbine) baseline: frictional decay down-fjord,
+        # calibrated to CARRA (calibrate.py). Falls back to a flat
+        # profile when baseline_length is unset.
+        # NB: the mouth->anchor segment is held flat at u_in, whereas the
+        # observed profile peaks ~5% above the mouth at the outer fjord.
+        # This slightly understates outer-fjord (Zone A) generation, i.e.
+        # it is conservative for the shielding-vs-generation LCOE gap.
+        if self.params.baseline_length:
+            u_base = float(u_in) * np.exp(
+                -np.maximum(x - self.params.baseline_anchor, 0.0)
+                / self.params.baseline_length)
+        else:
+            u_base = np.full(n, float(u_in))
+        u = u_base.copy()
         L = self.params.recovery_length
         H = self.params.effective_height
         f = self.params.channeling_fraction
 
+        sos = getattr(self.params, 'superposition', 'product') == 'sos'
+        sq_deficit = np.zeros(n)   # accumulated squared deficit (SoS mode)
+        clip_hits = 0              # rows where Ct·β·f saturated the cap
+
         row_data = []
         for row in sorted(rows, key=lambda r: r.x_position):
             idx = min(int(np.searchsorted(x, row.x_position)), n - 1)
-            u_loc = u[idx]
+            # Product superposition lets a row see the wake-reduced inflow
+            # of upstream rows; SoS references each row to the baseline.
+            u_loc = u_base[idx] if sos else u[idx]
             W = self.fjord.width(row.x_position)
             beta = row.total_swept / (W * H)
             ct_val = float(row.turbine.ct(
                 np.array([u_loc]), high_thrust=self.params.high_thrust)[0])
 
-            eff = min(ct_val * beta * f, 0.95)
+            eff_raw = ct_val * beta * f
+            if eff_raw > 0.95:
+                clip_hits += 1
+            eff = min(eff_raw, 0.95)
             d0 = 1.0 - np.sqrt(1.0 - eff)
 
             mask = x > row.x_position
-            u[mask] *= 1.0 - d0 * np.exp(-(x[mask] - row.x_position) / L)
+            decay = d0 * np.exp(-(x[mask] - row.x_position) / L)
+            if sos:
+                sq_deficit[mask] += decay ** 2
+            else:
+                u[mask] *= 1.0 - decay
 
             pw = float(row.turbine.power(np.array([u_loc]))[0])
             row_data.append({
@@ -184,11 +290,23 @@ class ChanneledWakeModel:
                 'deficit_pct': round(d0 * 100, 2),
             })
 
-        result = {'x': x, 'u': u, 'u_in': u_in, 'rows': row_data}
+        if sos:
+            u = u_base * (1.0 - np.sqrt(np.minimum(sq_deficit, 1.0)))
+
+        result = {'x': x, 'u': u, 'u_base': u_base, 'u_in': u_in,
+                  'rows': row_data, 'clip_hits': clip_hits}
         if target_x is not None:
             ti = min(int(np.searchsorted(x, target_x)), n - 1)
             result['target_u'] = round(float(u[ti]), 2)
+            result['baseline_u'] = round(float(u_base[ti]), 2)
+            # Total reduction vs the synoptic inflow at the mouth, kept for
+            # backward compatibility, plus its decomposition into the
+            # natural fjord sheltering and the marginal turbine effect.
             result['reduction_pct'] = round((1 - u[ti] / u_in) * 100, 2)
+            result['natural_reduction_pct'] = round(
+                (1 - u_base[ti] / u_in) * 100, 2)
+            result['turbine_reduction_pct'] = round(
+                (1 - u[ti] / u_base[ti]) * 100, 2) if u_base[ti] > 0 else 0.0
         return result
 
     def aep(self, rows, weibull_k=2.0, weibull_A=9.0, hours=8766):
@@ -217,7 +335,11 @@ class ChanneledWakeModel:
             results.append({
                 'u_in': u,
                 'u_target': res['target_u'],
+                'baseline_u': res.get('baseline_u', u),
                 'reduction_pct': res['reduction_pct'],
+                'natural_reduction_pct': res.get('natural_reduction_pct', 0.0),
+                'turbine_reduction_pct': res.get(
+                    'turbine_reduction_pct', res['reduction_pct']),
                 'power_mw': sum(r['mw_total'] for r in res['rows']),
             })
         return results

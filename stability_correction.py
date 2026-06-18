@@ -27,8 +27,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-from model import WakeParams, ChanneledWakeModel, STABILITY_PRESETS
-from designs import DESIGNS, EYJAFJORDUR, AKUREYRI
+from model import (WakeParams, ChanneledWakeModel, STABILITY_PRESETS,
+                   load_calibrated_baseline)
+from designs import DESIGNS, EYJAFJORDUR, AKUREYRI, rows_of, design_cost
 import carra
 
 OUT = Path('figures')
@@ -139,11 +140,11 @@ def compare_aep(neutral, corrected):
 
     for dname, info in DESIGNS.items():
         short = dname.split(')')[1].strip()
-        rows = info['rows']
-        cap = sum(r.capacity_mw for r in rows)
-        annual_cost = cap * 1000 * info['capex_kw'] * crf + cap * 1000 * 100
+        rows = rows_of(info)
+        cap, _, _, _, annual_cost = design_cost(dname, info)
 
-        m = ChanneledWakeModel(EYJAFJORDUR, WakeParams(200, 30_000, 0.7))
+        m = ChanneledWakeModel(EYJAFJORDUR, WakeParams(
+            200, 30_000, 0.7, baseline_length=load_calibrated_baseline()))
 
         mn = neutral['mouth']
         mc = corrected['mouth']

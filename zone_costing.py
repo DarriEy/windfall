@@ -4,8 +4,9 @@
 """Zone-specific placement classification and differential CAPEX."""
 
 import numpy as np
-from designs import DESIGNS, EYJAFJORDUR
-from model import WakeParams, ChanneledWakeModel, STABILITY_PRESETS
+from designs import DESIGNS, EYJAFJORDUR, rows_of
+from model import (WakeParams, ChanneledWakeModel, STABILITY_PRESETS,
+                   load_calibrated_baseline, marginal_reduction)
 import carra
 
 PLACEMENT = {
@@ -46,7 +47,7 @@ def main():
 
     results = []
     for dname, info in DESIGNS.items():
-        rows = info['rows']
+        rows = rows_of(info)
         is_onshore = info.get('_is_onshore', False)
 
         if is_onshore:
@@ -90,7 +91,8 @@ def main():
         blended = total_capex / (total_cap * 1000)
         annual = total_capex * CRF + total_opex
 
-        m = ChanneledWakeModel(EYJAFJORDUR, WakeParams(200, 30_000, 0.7))
+        m = ChanneledWakeModel(EYJAFJORDUR, WakeParams(
+            200, 30_000, 0.7, baseline_length=load_calibrated_baseline()))
         aep = m.aep(rows, weibull_k=wb_k, weibull_A=wb_A)
         lcoe = annual / (aep['aep_gwh'] * 1000) if aep['aep_gwh'] > 0 else 999
 
@@ -102,7 +104,7 @@ def main():
 
         m_s = ChanneledWakeModel(EYJAFJORDUR, STABILITY_PRESETS['stable'])
         r20 = m_s.simulate(rows, 20.0, target_x=55000)
-        dp20 = (1 - (r20['target_u'] / 20.0)**2) * 100
+        _, dp20 = marginal_reduction(r20)   # turbine-only, vs baseline
 
         saving = orig_lcoe - lcoe
         aep_val = aep['aep_gwh']

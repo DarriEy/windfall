@@ -19,6 +19,7 @@ import numpy as np
 from model import (
     TurbineSpec, FjordGeometry, TurbineRow, WakeParams,
     ChanneledWakeModel, Constriction, STABILITY_PRESETS,
+    load_calibrated_baseline,
 )
 import carra
 
@@ -152,6 +153,30 @@ DESIGNS = {
         '_mountain': 'Súlur',
         '_opex_kw': 50,
     },
+    'E) SAMSETT': {
+        'subtitle': 'Split: outer generation + dense inner shield',
+        'rationale': [
+            'Two separately-costed clusters instead of one blended farm,',
+            'so the shield is not judged as a (poor) generator.',
+            'Generation cluster: 18x Future20 at the windy outer fjord',
+            '(km 10-14, floating $4,000/kW) — a standalone $144/MWh',
+            'project, competitive and independently financeable.',
+            'Shield cluster: 6x Future20 packed densely in the inner',
+            'fjord (km 37-39, coastal $2,800/kW), close to Akureyri where',
+            'the wake has not recovered. As a generator it is poor',
+            '($196/MWh, CF 13%), but it buys pressure reduction at',
+            '~46 %/$B — 2.2x the shielding-per-ISK of the blended',
+            'JAFNVAEGI farm. It is costed as a storm-protection asset.',
+        ],
+        'turbine': FUTURE20,        # representative (for fallback display)
+        'capex_kw': 3700,           # nominal; true blend computed per-cluster
+        'clusters': [
+            {'turbine': FUTURE20, 'capex_kw': 4000, 'opex_kw': 100,
+             'rows': _rows([10, 12, 14], 6, FUTURE20)},
+            {'turbine': FUTURE20, 'capex_kw': 2800, 'opex_kw': 60,
+             'rows': _rows([37, 39], 3, FUTURE20)},
+        ],
+    },
 }
 
 
@@ -164,16 +189,54 @@ ZONE_OPEX = {
 }
 
 
-def eval_design(name, info, fjord, wb_k, wb_A):
-    rows = info['rows']
-    turb = info['turbine']
-    capex_kw = info['capex_kw']
-    cap = sum(r.capacity_mw for r in rows)
-    n = sum(r.n_turbines for r in rows)
-    n_rows = len(rows)
+# ── Canonical design accessors (use these everywhere; do NOT index
+#    info['rows'] directly — a design may instead carry 'clusters') ──
 
-    opex_kw = info.get('_opex_kw', ZONE_OPEX.get(name, OPEX_KW))
-    annual_cost = cap * 1000 * capex_kw * CRF + cap * 1000 * opex_kw
+def rows_of(info):
+    """All turbine rows for a design, whether monolithic ('rows') or
+    split into separately-costed clusters ('clusters')."""
+    return info.get('rows') or [r for c in info.get('clusters', [])
+                                for r in c['rows']]
+
+
+def design_cost(name, info):
+    """Economics for any design. Returns
+    (cap_mw, n_turbines, capex_m_usd, blended_capex_kw, annual_cost_usd).
+    Clusters are summed cluster-by-cluster with their own CAPEX/OPEX."""
+    clusters = info.get('clusters')
+    if clusters:
+        rows = rows_of(info)
+        cap = sum(r.capacity_mw for r in rows)
+        n = sum(r.n_turbines for r in rows)
+        capex_m = sum(sum(r.capacity_mw for r in c['rows']) * c['capex_kw']
+                      for c in clusters) / 1000
+        annual = sum(
+            sum(r.capacity_mw for r in c['rows']) * 1000
+            * (c['capex_kw'] * CRF + c.get('opex_kw', OPEX_KW))
+            for c in clusters)
+        capex_kw = round(capex_m * 1000 / cap) if cap else 0
+    else:
+        rows = info['rows']
+        cap = sum(r.capacity_mw for r in rows)
+        n = sum(r.n_turbines for r in rows)
+        capex_kw = info['capex_kw']
+        opex_kw = info.get('_opex_kw', ZONE_OPEX.get(name, OPEX_KW))
+        capex_m = cap * capex_kw / 1000
+        annual = cap * 1000 * (capex_kw * CRF + opex_kw)
+    return cap, n, capex_m, capex_kw, annual
+
+
+def eval_design(name, info, fjord, wb_k, wb_A):
+    # A design is either monolithic (single turbine + single CAPEX) or a
+    # set of separately-costed clusters (e.g. outer-fjord generation on
+    # floating foundations + a dense inner-fjord shield on cheap coastal
+    # foundations). Clusters are evaluated as one combined wake for
+    # shielding, but their economics are summed cluster-by-cluster so a
+    # weak-resource shield cluster is not credited with outer-fjord wind.
+    rows = rows_of(info)
+    cap, n, capex_m, capex_kw, annual_cost = design_cost(name, info)
+    turb = info.get('turbine') or rows[0].turbine
+    n_rows = len(rows)
 
     is_onshore = info.get('_is_onshore', False)
 
@@ -197,13 +260,15 @@ def eval_design(name, info, fjord, wb_k, wb_A):
     else:
         m_aep = ChanneledWakeModel(fjord, WakeParams(
             effective_height=200, recovery_length=30_000,
-            channeling_fraction=0.7))
+            channeling_fraction=0.7,
+            baseline_length=load_calibrated_baseline()))
         aep = m_aep.aep(rows, weibull_k=wb_k, weibull_A=wb_A)
     lcoe = annual_cost / (aep['aep_gwh'] * 1000) if aep['aep_gwh'] > 0 else 9999
 
     # Wind reduction under each stability regime
     speeds = [10, 12, 16, 20, 25]
-    if turb.cut_out >= 30:
+    max_cut_out = max((r.turbine.cut_out for r in rows), default=turb.cut_out)
+    if max_cut_out >= 30:
         speeds.append(30)
 
     if is_onshore:
@@ -220,7 +285,8 @@ def eval_design(name, info, fjord, wb_k, wb_A):
 
         ht_params = WakeParams(
             effective_height=200, recovery_length=80_000,
-            channeling_fraction=0.92, high_thrust=True)
+            channeling_fraction=0.92, high_thrust=True,
+            baseline_length=load_calibrated_baseline())
         m_ht = ChanneledWakeModel(fjord, ht_params)
         ht_results = m_ht.sweep_speeds(rows, AKUREYRI, speeds)
 
@@ -241,7 +307,7 @@ def eval_design(name, info, fjord, wb_k, wb_A):
     return {
         'name': name, 'info': info,
         'n': n, 'n_rows': n_rows, 'cap': cap,
-        'capex_m': cap * capex_kw / 1000,
+        'capex_m': capex_m, 'capex_kw': capex_kw,
         'annual_m': annual_cost / 1e6,
         'aep': aep, 'lcoe': lcoe,
         'stab': stab_results, 'ht': ht_results,
@@ -268,45 +334,68 @@ def print_design(d):
     for line in info['rationale']:
         print(f'    {line}')
     print()
-    t = info['turbine']
-    print(f'  Turbine:  {t.name}')
-    print(f'            {t.rotor_diameter:.0f}m rotor | '
-          f'{t.hub_height:.0f}m hub | '
-          f'cut-out {t.cut_out:.0f} m/s')
+    clusters = info.get('clusters')
+    if clusters:
+        for ci, c in enumerate(clusters, 1):
+            ct = c['turbine']
+            cn = sum(r.n_turbines for r in c['rows'])
+            ccap = sum(r.capacity_mw for r in c['rows'])
+            role = 'generation' if ci == 1 else 'shield'
+            print(f'  Cluster {ci} ({role}): {cn}x {ct.name} | '
+                  f'{ccap:.0f} MW | ${c["capex_kw"]:,}/kW')
+    else:
+        t = info['turbine']
+        print(f'  Turbine:  {t.name}')
+        print(f'            {t.rotor_diameter:.0f}m rotor | '
+              f'{t.hub_height:.0f}m hub | '
+              f'cut-out {t.cut_out:.0f} m/s')
     print(f'  Layout:   {d["n"]} turbines | '
           f'{d["n_rows"]} rows | '
           f'{d["cap"]:.0f} MW')
     print(f'  CAPEX:    ${d["capex_m"]:,.0f}M  '
-          f'(${info["capex_kw"]:,}/kW)')
+          f'(${d["capex_kw"]:,}/kW blended)')
     print(f'  AEP:      {d["aep"]["aep_gwh"]:,.0f} GWh  |  '
           f'CF {d["aep"]["cf_pct"]:.1f}%  |  '
           f'LCOE ${d["lcoe"]:.0f}/MWh')
     print()
 
-    # Wind reduction table
-    print(f'  Wind reduction at Akureyri by atmospheric stability:')
+    # Wind reduction table -- MARGINAL turbine effect, on top of the
+    # natural fjord sheltering (which the CARRA-calibrated baseline
+    # already reproduces). Showing the total vs mouth-inflow would
+    # conflate the turbines with the fjord's own ~45% nordanatt decay.
+    print(f'  TURBINE-INDUCED wind reduction at Akureyri (marginal, on')
+    print(f'  top of natural fjord sheltering) by atmospheric stability:')
     print()
+    if not d['info'].get('_is_onshore', False):
+        nb = d['stab']['neutral'][0]
+        nat = nb.get('natural_reduction_pct', 0.0)
+        print(f'  Natural baseline sheltering (no turbines): '
+              f'{nat:.0f}% slower at Akureyri than at the mouth')
+        print()
     print(f'  {"Incoming":>8}  {"Neutral":>9}  {"Stable":>9}  '
           f'{"V.Stable":>9}  {"VS+HT":>9}')
     print(f'  {"":->8}  {"":->9}  {"":->9}  {"":->9}  {"":->9}')
 
+    def _marginal(r):
+        ub = r.get('baseline_u', r['u_in'])
+        sr = r.get('turbine_reduction_pct', r['reduction_pct'])
+        dp = (1 - (r['u_target'] / ub) ** 2) * 100 if ub > 0 else 0.0
+        return f'{sr:>4.1f}/{dp:>4.1f}%'
+
     for i, spd_result in enumerate(d['stab']['neutral']):
         u = spd_result['u_in']
-        vals = []
-        for slab in ['neutral', 'stable', 'very_stable']:
-            r = d['stab'][slab][i]
-            dp = (1 - (r['u_target'] / r['u_in']) ** 2) * 100 \
-                if r['u_in'] > 0 else 0
-            vals.append(f'{r["reduction_pct"]:>4.1f}/{dp:>4.1f}%')
-        # HT
-        rh = d['ht'][i]
-        dph = (1 - (rh['u_target'] / rh['u_in']) ** 2) * 100 \
-            if rh['u_in'] > 0 else 0
-        vals.append(f'{rh["reduction_pct"]:>4.1f}/{dph:>4.1f}%')
+        vals = [_marginal(d['stab'][slab][i])
+                for slab in ['neutral', 'stable', 'very_stable']]
+        vals.append(_marginal(d['ht'][i]))
         print(f'  {u:>5.0f} m/s  {vals[0]:>9}  {vals[1]:>9}  '
               f'{vals[2]:>9}  {vals[3]:>9}')
     print()
-    print(f'  Format: speed_reduction / pressure_reduction')
+    print(f'  Format: turbine speed_reduction / turbine pressure_reduction')
+    print(f'  (both measured against the no-turbine fjord baseline)')
+    print(f'  NB: product (multiplicative) superposition — the OPTIMISTIC '
+          f'end.')
+    print(f'  Sum-of-squares gives ~40-60% of these; see uncertainty.py '
+          f'for P10/P50/P90.')
     print()
 
     # Revenue
@@ -361,29 +450,31 @@ def print_comparison(designs):
         [f'${d["lcoe"]:.0f}/MWh' for d in designs])
     print()
 
-    # Wind reduction at 20 m/s under stable conditions
+    # Marginal turbine-induced wind reduction at 20 m/s inflow, by
+    # stability (separate from the natural fjord baseline).
+    def _turb_red20(d, slab):
+        r = [r for r in d['stab'][slab] if r['u_in'] == 20][0]
+        return r.get('turbine_reduction_pct', r['reduction_pct'])
+
     for slab, label in [('neutral', 'du20 neutral'),
                         ('stable', 'du20 stable'),
                         ('very_stable', 'du20 v.stable')]:
-        vals = []
-        for d in designs:
-            r20 = [r for r in d['stab'][slab] if r['u_in'] == 20][0]
-            vals.append(f'{r20["reduction_pct"]:.1f}%')
-        row(label, vals)
+        row(label, [f'{_turb_red20(d, slab):.1f}%' for d in designs])
 
-    # Pressure reduction
+    # Turbine-induced pressure reduction (vs no-turbine baseline)
     vals_dp = []
     for d in designs:
         r20 = [r for r in d['stab']['stable'] if r['u_in'] == 20][0]
-        dp = (1 - (r20['u_target'] / 20.0) ** 2) * 100
+        ub = r20.get('baseline_u', 20.0)
+        dp = (1 - (r20['u_target'] / ub) ** 2) * 100 if ub > 0 else 0.0
         vals_dp.append(f'{dp:.1f}%')
-    row('dP20 stable', vals_dp)
+    row('dP20 stable (turbine)', vals_dp)
 
     # High-thrust at very stable
     vals_ht = []
     for d in designs:
         r20 = [r for r in d['ht'] if r['u_in'] == 20][0]
-        vals_ht.append(f'{r20["reduction_pct"]:.1f}%')
+        vals_ht.append(f'{r20.get("turbine_reduction_pct", 0):.1f}%')
     row('du20 v.stable+HT', vals_ht)
 
     print()
@@ -413,32 +504,33 @@ def print_verdict():
     print()
     lines = [
         'SULUR is the cheapest electricity. Nobody disputes that.',
-        'Onshore mountain wind beats everything on LCOE.',
+        'Onshore mountain wind beats everything on LCOE ($36/MWh).',
         'But Sulur gives Akureyri nothing except a changed skyline.',
         '',
-        'The surprise: JAFNVAEGI is CHEAPER than ORKA.',
-        'The shielding configuration uses shallower inner-fjord',
-        'sites with fixed-bottom and coastal foundations ($2,800-',
-        '$3,500/kW) while ORKA uses deep outer water ($4,500/kW).',
-        'Blended CAPEX: $3,500/kW vs $4,500/kW.',
+        'The honest result, once each turbine is costed at its true',
+        'along-fjord wind: shielding is NOT free. The inner-fjord sites',
+        'that shelter Akureyri best sit in the weakest wind, so the',
+        'monolithic shield (JAFNVAEGI, $161/MWh) is dearer than pure',
+        'outer-fjord generation (ORKA, $140/MWh) — not cheaper.',
         '',
-        'The dual-purpose framing does not just add value — it',
-        'accesses cheaper foundation sites that happen to also',
-        'be the right sites for wake shielding.',
+        'The fix is not to blend, but to split (SAMSETT):',
+        '  - an outer generation cluster that stands alone at $144/MWh,',
+        '  - plus a small dense inner shield costed as a storm-protection',
+        '    asset, buying pressure reduction at ~46 %/$B (2.2x the',
+        '    shielding-per-ISK of the blended JAFNVAEGI farm).',
+        'SAMSETT delivers ~23% stable-nordanatt pressure reduction at',
+        '$155/MWh blended (lower LCOE than JAFNVAEGI). Being a larger',
+        'build its absolute household premium is higher at low power',
+        'prices, but lower once prices cover cost (green H2: 79k vs',
+        '121k ISK/household).',
         '',
-        'JAFNVAEGI delivers:',
-        '  - 14% pressure reduction during stable nordanatt',
-        '  - LCOE competitive with European offshore wind',
-        '  - Sulur undisturbed',
-        '  - Hrisey gets an O&M economy',
-        '  - Cheaper per MWh than placing turbines offshore',
-        '    where they would provide no shielding',
+        'Shielding is a co-benefit bought at a modest premium, not a',
+        'free by-product. The question is not "what is the cheapest',
+        'kWh?" but "what does Akureyri get for what it pays?"',
         '',
-        'The question is not "what is the cheapest kWh?"',
-        'The question is "what does Akureyri get for what it pays?"',
-        '',
-        'SULUR: cheapest electricity + ruined skyline + nordanatt',
-        'JAFNVAEGI: competitive electricity + logn + Sulur intact',
+        'SULUR:   cheapest electricity + ruined skyline + nordanatt',
+        'SAMSETT: competitive generation + a priced logn shield + Sulur',
+        '         intact',
     ]
     for line in lines:
         print(f'  {line}')
@@ -464,7 +556,7 @@ def main():
 
     print()
     hr()
-    print('  WINDFALL: Three Designs for Eyjafjordur')
+    print('  WINDFALL: Five Designs for Eyjafjordur')
     hr()
     print()
     print(f'  Wind data: {clim["source"]}')
