@@ -222,6 +222,52 @@ STABILITY_PRESETS: Dict[str, WakeParams] = {
 }
 
 
+# ── WRF-anchored recalibration ───────────────────────────────────
+# The presets above assume L = 30-80 km. The WRF 1 km runs
+# (wrf/fit_recovery_length.py) show the turbine wake recovers far
+# faster: an open-fjord fit gives L = 10 km (R2 = 0.83 over ~40 km of
+# downstream fetch), a near-head fit ~2 km. We adopt the open-fjord
+# value as the WRF-anchored recovery length. Combined with the CARRA
+# pressure-level channeling fraction (f = 0.31, ridge_stability.py),
+# this re-anchors the reduced-order model to the mesoscale evidence,
+# making it a fast, WRF-consistent tool for placement search. The long-L
+# presets are kept above only for comparison with the original study.
+WRF_RECOVERY_LENGTH = 10_000.0     # m (open-fjord WRF fit, fallback)
+WRF_CHANNELING_FRACTION = 0.31     # CARRA pressure-level ridge N
+WRF_RECOVERY_FILE = Path(__file__).parent / 'data' / 'wrf_recovery_calibration.json'
+
+
+def load_wrf_recovery():
+    """WRF-derived open-fjord recovery length L (m), from
+    wrf/fit_recovery_length.py. Warns and falls back to the hard-coded
+    WRF_RECOVERY_LENGTH if the calibration file is absent; a present but
+    malformed file raises (a bad file is never silently trusted)."""
+    import json
+    import warnings
+    if not WRF_RECOVERY_FILE.exists():
+        warnings.warn(
+            f'WRF recovery calibration {WRF_RECOVERY_FILE.name} not found; '
+            f'using hard-coded L = {WRF_RECOVERY_LENGTH/1000:.0f} km. Run '
+            f'`python wrf/fit_recovery_length.py` to regenerate.', stacklevel=2)
+        return WRF_RECOVERY_LENGTH
+    res = json.load(open(WRF_RECOVERY_FILE))      # malformed -> raises
+    outer = res.get('outer') or {}                # open-fjord fit preferred
+    L_km = outer.get('L_km')
+    return L_km * 1000.0 if L_km else WRF_RECOVERY_LENGTH
+
+
+def wrf_calibrated_presets():
+    """STABILITY_PRESETS re-anchored to the WRF recovery length and the
+    data-derived channeling fraction f — the mesoscale-consistent
+    configuration for placement search. Baseline (natural sheltering) is
+    unchanged from the observed CARRA calibration."""
+    from dataclasses import replace
+    L = load_wrf_recovery()
+    return {name: replace(p, recovery_length=L,
+                          channeling_fraction=WRF_CHANNELING_FRACTION)
+            for name, p in STABILITY_PRESETS.items()}
+
+
 class ChanneledWakeModel:
 
     def __init__(self, fjord: FjordGeometry, params: WakeParams = None):
