@@ -47,30 +47,35 @@ turbine table** (the Fitch reader wants `nval` on line 1, then
 full farm run — no recompile needed.
 
 **Result (compare_wrf_1d.py, figures/wrf_vs_1d.png):** WRF produces a
-clear turbine wake — peak ≈ 10% pressure reduction at Hrísey (25 km,
-downstream of the outer cluster) — but it **recovers within ~10-15 km**
-and is **≈0.2% at Akureyri** (55 km). The 1D model, with its assumed
-recovery length L = 55-80 km, instead carries ~23% all the way to the
-head. So the mesoscale run does **not** reproduce the 1D channeled-wake
-persistence: the "Fjord Effect" recovery length is much shorter in WRF,
-and the shielding at Akureyri is essentially negligible in this case.
-This is consistent with the low data-derived channeling fraction
-(f≈0.31, ridge_stability.py).
+clear turbine wake — peak ≈ 8-10% pressure reduction at Dalvík/Hrísey
+(18-25 km, downstream of the outer cluster) — but it **recovers within
+~15-25 km** and is **≈0.2% at Akureyri** (55 km). The 1D model, with its
+assumed recovery length L = 55-80 km, instead carries ~23% all the way to
+the head. So the mesoscale run does **not** reproduce the 1D
+channeled-wake persistence: the "Fjord Effect" recovery length is much
+shorter in WRF, and the shielding at Akureyri is essentially negligible
+in this case. This is consistent with the low data-derived channeling
+fraction (f≈0.31, ridge_stability.py).
 
-**Caveats:** one 12-h event, 3-km grid (coarse — numerical mixing likely
-accelerates recovery; a 1-km nest is the next check), single config. But
-the direction is unambiguous and matters: the headline 1D shielding is
-likely overstated, and the wake-recovery length L (the dominant
-persistence parameter) is the thing a higher-resolution mesoscale study
-should pin down.
+**1 km confirmation (proof1km/, figures/wrf_resolution.png):** the same
+event re-run with a third nest at **1 km** (`windfarm_opt=1` on d03)
+reproduces the 3 km picture almost exactly — peak ~8% at 18-25 km,
+≈0.2% at Akureyri. The agreement across resolutions rules out the
+obvious objection that 3 km numerical mixing artificially accelerated
+the recovery: the short recovery length is **resolution-robust**, not a
+coarse-grid artifact. Both WRF runs were executed natively on this Mac
+(arm64, MPI/dmpar build, ~8.7× faster than serial).
+
+**Caveats:** one 12-h winter event, single config (SAMSETT). The
+multi-event question — does the short recovery hold across the full
+norðanátt distribution — is now the decisive remaining test, not
+resolution.
 
 ## Status / honest scope
-The toolchain, deck, and drivers are complete and the binaries are
-verified to execute. The **run itself is not done on this machine**: it
-needs the ~29 GB geography download plus met data, and a serial WRF
-9/3/1-km nest under amd64 emulation in an 8 GB Docker VM will not complete
-a 36-h case (the 1-km domain alone exceeds the memory/throughput budget).
-This is the HPC-scale step the validation plan calls for — the deck here
-is drop-in for a native-Linux/HPC WRF with the data staged. A single
-coarsened domain could be run locally as a smoke test by reducing
-`max_dom` to 1 and enlarging `dx`, at the cost of resolving the fjord.
+The toolchain, deck, drivers, **and the runs themselves are complete on
+this machine**: a native arm64 MPI WRF build (`build_arm64/`) ran the
+full 9/3/1-km nest for the design event, baseline and 24-turbine, at
+both 3 km (`proof/`) and 1 km (`proof1km/`). The Docker `amd64` image
+remains the portable/HPC-drop-in path; the native build is what made
+the 1-km nest tractable locally. The remaining HPC-scale work is the
+multi-event campaign, not a single higher-resolution run.

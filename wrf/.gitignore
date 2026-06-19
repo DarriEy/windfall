@@ -12,4 +12,6 @@ wrfinput_*
 wrfbdy_*
 rsl.*
 proof/
+proof1km/
+build_arm64/
 _fetch_era5.py

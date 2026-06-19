@@ -18,6 +18,8 @@ paper_figures.py
 analyze.py
 fetch_dem.py
 stations.py
+_fetch_*.py
+_process_*.py
 
 # Build artifacts
 Archive.zip
