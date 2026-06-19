@@ -58,15 +58,22 @@ def turbine_latlons(rows):
 
 
 def write_turbine_tbl(turb, path):
-    """Fitch wind-turbine-1.tbl: line1 = hub diameter standing_Ct npower;
-    then npower rows of (windspeed, thrust_coeff, power_kW)."""
+    """Fitch wind-turbine-1.tbl, in the exact order module_wind_fitch.F
+    reads it:
+      line 1: nval (integer count of power-curve points)
+      line 2: hubheight diameter standing_Ct npower
+      then nval rows of (windspeed, thrust_coeff, power_kW)
+    (Getting line 1 wrong silently aborts the read and zeroes the
+    turbine — the cause of the earlier zero-thrust run.)"""
     speeds = np.arange(float(turb.cut_in), float(turb.cut_out) + 0.5, 1.0)
     ct = turb.ct(speeds)                     # thrust coeff curve
     pw_kw = turb.power(speeds) * 1000.0      # MW -> kW
     standing_ct = 0.158                      # idling Ct (WRF default order)
+    n = len(speeds)
     with open(path, 'w') as f:
+        f.write(f'{n}\n')
         f.write(f'{turb.hub_height:.1f} {turb.rotor_diameter:.1f} '
-                f'{standing_ct:.3f} {len(speeds)}\n')
+                f'{standing_ct:.3f} {n}\n')
         for s, c, p in zip(speeds, ct, pw_kw):
             f.write(f'{s:.1f} {c:.4f} {p:.2f}\n')
 
