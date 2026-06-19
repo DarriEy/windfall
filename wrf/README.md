@@ -35,31 +35,34 @@ python3 wrf/compare_wrf_1d.py wrf/wrfout_d03_baseline.nc wrf/wrfout_d03_turbines
 ```
 
 ## Proof-run results (executed locally, 2026-06-19)
-The full real-data chain was run on this Mac for a strong norðanátt
-(Jan 1 2022, ERA5 forcing, real DEM), reduced to a tractable 9/3-km,
-12-h case under amd64 emulation:
-- **geogrid → ungrib → metgrid → real → wrf all succeed**; both the
-  no-turbine and with-turbine 12-h integrations complete (SUCCESS
-  COMPLETE WRF). The mesoscale pipeline works end-to-end here. Baseline
-  Akureyri hub wind ≈ 21 m/s.
-- **But the Fitch wind-farm drag does not engage in this image.** Two
-  issues were found: (a) the scheme segfaults when >1 turbine shares a
-  grid cell (worked around by de-densifying to ≤1 per 3-km cell); and
-  (b) with that fixed it runs but computes **zero thrust/power**
-  (POWER ≡ 0, ΔU ≡ 0 vs baseline, even with windfarm_opt on both
-  domains) — the turbines are read and mapped but produce no momentum
-  sink. This is a WRF build/coupling problem (likely the hub-wind
-  vertical mapping, or windfarm not fully enabled at compile in this
-  community image), not a physics result. No WRF wake number was
-  obtained.
-- **Conclusion:** the pipeline is validated, but a meaningful turbine-
-  wake comparison needs (i) a WRF build with the wind-farm scheme
-  verified to apply drag (recompile with WRF_WINDFARM, or a different
-  image), and (ii) the 1-km domain on HPC where the fjord and farm
-  resolve (turbines spread across many cells, no per-cell collisions).
-  Notably this is consistent with the 1D-model caveats (low f≈0.31 from
-  pressure-level data, H_eff sensitivity): the channeled wake is not
-  obviously strong, and the 3-km grid cannot resolve it regardless.
+The full real-data chain ran on this Mac for a strong norðanátt
+(Jan 1 2022, ERA5 forcing, real DEM), as a tractable 9/3-km, 12-h case
+under amd64 emulation: **geogrid → ungrib → metgrid → real → wrf** all
+succeed; the no-turbine and with-turbine (full 24-turbine SAMSETT)
+integrations both complete. Baseline Akureyri hub wind ≈ 21 m/s.
+
+The earlier zero-thrust/segfault problems were traced to a **malformed
+turbine table** (the Fitch reader wants `nval` on line 1, then
+`hub diam stc npower`); fixing the format made the drag apply and the
+full farm run — no recompile needed.
+
+**Result (compare_wrf_1d.py, figures/wrf_vs_1d.png):** WRF produces a
+clear turbine wake — peak ≈ 10% pressure reduction at Hrísey (25 km,
+downstream of the outer cluster) — but it **recovers within ~10-15 km**
+and is **≈0.2% at Akureyri** (55 km). The 1D model, with its assumed
+recovery length L = 55-80 km, instead carries ~23% all the way to the
+head. So the mesoscale run does **not** reproduce the 1D channeled-wake
+persistence: the "Fjord Effect" recovery length is much shorter in WRF,
+and the shielding at Akureyri is essentially negligible in this case.
+This is consistent with the low data-derived channeling fraction
+(f≈0.31, ridge_stability.py).
+
+**Caveats:** one 12-h event, 3-km grid (coarse — numerical mixing likely
+accelerates recovery; a 1-km nest is the next check), single config. But
+the direction is unambiguous and matters: the headline 1D shielding is
+likely overstated, and the wake-recovery length L (the dominant
+persistence parameter) is the thing a higher-resolution mesoscale study
+should pin down.
 
 ## Status / honest scope
 The toolchain, deck, and drivers are complete and the binaries are
