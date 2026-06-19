@@ -34,6 +34,33 @@ docker run --rm --platform linux/amd64 \
 python3 wrf/compare_wrf_1d.py wrf/wrfout_d03_baseline.nc wrf/wrfout_d03_turbines.nc
 ```
 
+## Proof-run results (executed locally, 2026-06-19)
+The full real-data chain was run on this Mac for a strong norðanátt
+(Jan 1 2022, ERA5 forcing, real DEM), reduced to a tractable 9/3-km,
+12-h case under amd64 emulation:
+- **geogrid → ungrib → metgrid → real → wrf all succeed**; both the
+  no-turbine and with-turbine 12-h integrations complete (SUCCESS
+  COMPLETE WRF). The mesoscale pipeline works end-to-end here. Baseline
+  Akureyri hub wind ≈ 21 m/s.
+- **But the Fitch wind-farm drag does not engage in this image.** Two
+  issues were found: (a) the scheme segfaults when >1 turbine shares a
+  grid cell (worked around by de-densifying to ≤1 per 3-km cell); and
+  (b) with that fixed it runs but computes **zero thrust/power**
+  (POWER ≡ 0, ΔU ≡ 0 vs baseline, even with windfarm_opt on both
+  domains) — the turbines are read and mapped but produce no momentum
+  sink. This is a WRF build/coupling problem (likely the hub-wind
+  vertical mapping, or windfarm not fully enabled at compile in this
+  community image), not a physics result. No WRF wake number was
+  obtained.
+- **Conclusion:** the pipeline is validated, but a meaningful turbine-
+  wake comparison needs (i) a WRF build with the wind-farm scheme
+  verified to apply drag (recompile with WRF_WINDFARM, or a different
+  image), and (ii) the 1-km domain on HPC where the fjord and farm
+  resolve (turbines spread across many cells, no per-cell collisions).
+  Notably this is consistent with the 1D-model caveats (low f≈0.31 from
+  pressure-level data, H_eff sensitivity): the channeled wake is not
+  obviously strong, and the 3-km grid cannot resolve it regardless.
+
 ## Status / honest scope
 The toolchain, deck, and drivers are complete and the binaries are
 verified to execute. The **run itself is not done on this machine**: it

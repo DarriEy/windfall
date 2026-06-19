@@ -11,3 +11,5 @@ wrfout_*
 wrfinput_*
 wrfbdy_*
 rsl.*
+proof/
+_fetch_era5.py
