@@ -1,0 +1,36 @@
+&time_control
+ run_days=0, run_hours=12, run_minutes=0,
+ start_year=3*2022, start_month=3*03, start_day=3*28, start_hour=3*06,
+ end_year=3*2022, end_month=3*03, end_day=3*28, end_hour=3*18,
+ interval_seconds=21600, input_from_file=3*.true.,
+ history_interval=60,60,30, frames_per_outfile=1000,1000,1000,
+ restart=.false., io_form_history=2, io_form_restart=2,
+ io_form_input=2, io_form_boundary=2,
+/
+&domains
+ time_step=45, max_dom=3,
+ e_we=61,52,73, e_sn=61,52,73, e_vert=35,35,35,
+ dx=9000,3000,1000, dy=9000,3000,1000,
+ grid_id=1,2,3, parent_id=1,1,2,
+ i_parent_start=1,22,14, j_parent_start=1,22,14,
+ parent_grid_ratio=1,3,3, parent_time_step_ratio=1,3,3,
+ p_top_requested=5000, num_metgrid_levels=33, num_metgrid_soil_levels=4,
+/
+&physics
+ mp_physics=6,6,6, ra_lw_physics=4,4,4, ra_sw_physics=4,4,4,
+ sf_sfclay_physics=5,5,5, sf_surface_physics=2,2,2, bl_pbl_physics=5,5,5,
+ cu_physics=1,0,0, num_soil_layers=4,
+ windfarm_opt=0,0,1, windfarm_ij=0,
+/
+&fdda
+/
+&dynamics
+ hybrid_opt=2, w_damping=1, diff_opt=2,2,2, km_opt=4,4,4, diff_6th_opt=0,0,0,
+ damp_opt=3, zdamp=5000, dampcoef=0.2,
+/
+&bdy_control
+ spec_bdy_width=5, specified=.true.,
+/
+&namelist_quilt
+ nio_tasks_per_group=0, nio_groups=1,
+/
