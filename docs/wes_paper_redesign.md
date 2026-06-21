@@ -1,27 +1,45 @@
 # WES paper — rethought from scratch (2026-06)
 
-The original paper asked "does the Eyjafjörður fjord channel turbine wakes to
-shelter Akureyri?" and answered yes (the "Fjord Effect"). Every load-bearing
-claim of that paper is now overturned by the WRF work. This is not a revision —
-it is a different, and stronger, paper. Below is the from-scratch design.
+The central idea is unchanged and is the heart of the paper: **wind energy as
+multipurpose infrastructure — the turbine wake, normally treated as a pure loss,
+reframed as a community wind-reduction PUBLIC GOOD delivered alongside
+electricity.** The original Eyjafjörður draft (make_wes_paper.py, kept as a prior
+draft — NOT a separate paper) located that public good in storm-shielding the
+fjord head ("the Fjord Effect"). The WRF work does not retire the public-good
+thesis; it *refines where and how the public good is realizable*. This document
+is the from-scratch design of the single paper we are converging on.
 
 ## Working title
-**"When do wind-farm wakes shelter a community? A mesoscale comparison of
-confined-fjord and open-coast terrain in Iceland."**
-(Alt: "Wind farms as community wind-reduction infrastructure: why confined
-terrain leaks the shelter and open coast holds it.")
+**"The wake as a public good: wind farms as dual-purpose generation-and-shelter
+infrastructure, tested across fjord and open-coast terrain."**
+(Alt: "Multipurpose wind energy: when a turbine wake is a community
+wind-reduction public good — a mesoscale study in Iceland.")
 
 ## One-sentence thesis
-Turbine wakes *can* shelter a downstream community, but whether they do is set
-by terrain and turbine cut-out — not by the channeling the original hypothesis
-relied on: confined fjords *leak* the shelter over their ridges while suiting
-generation, open coasts *hold* a coherent wake, and the robust prize everywhere
-is reduction of the everyday wind, not the catastrophic storm.
+A wind farm's wake can be a public good — measurable community wind reduction
+delivered jointly with power — but the *form* that public good takes is set by
+terrain and turbine cut-out: confined fjords leak the shelter over their ridges
+(so there the public value is generation), open coasts hold a coherent wake (so
+there the wake delivers real, uniform, city-wide wind reduction), and the most
+broadly realizable public good is a persistent cut to the *everyday* wind of
+exposed communities, not protection from the rare catastrophic storm.
+
+## Why this is still a multipurpose / public-good paper (not a refutation)
+The dual-purpose framing is the contribution. The wake is reframed from a
+generation loss (array-efficiency penalty) into a sited, deliverable amenity.
+The mesoscale study is what turns that from an assertion into an engineering
+result: it says *which terrains and which wind regimes* convert the wake into a
+public good, and at what scale. The Eyjafjörður storm-shield was one candidate
+form of the public good; the analysis replaces it with better-supported forms
+(open-coast everyday-wind reduction; terrain-selective generation+shelter), so
+the public-good thesis comes out sharper, quantified, and generalizable.
 
 ## Abstract (draft)
-Wind-turbine wakes lower the wind downstream, raising the question of whether a
-wind farm could be sited deliberately to shelter a community — from storms or
-from chronic wind. We test this with WRF-ARW simulations (nested to 1 km, Fitch
+A wind farm's wake lowers the wind downstream — usually counted only as a loss
+of array efficiency. We ask whether that wake can instead be treated as a
+deliberate public good: community wind reduction delivered jointly with
+electricity, making the farm dual-purpose infrastructure. We test where and how
+this is realizable with WRF-ARW simulations (nested to 1 km, Fitch
 wind-farm parameterization, ERA5-forced) at two contrasting north-Iceland sites:
 the narrow ridge-flanked Eyjafjörður fjord (town Akureyri at its head) and the
 open coast of the capital, Reykjavík. A reduced-order channeled-flow model,
@@ -106,7 +124,17 @@ city-wide everyday-wind reduction.
   everyday-reduction result, the design-optimization synthesis.
 
 ## Honest framing
-This is a *negative-result-that-became-a-better-question* paper. The original
-hypothesis was clean and testable; the mesoscale test refuted it and, in doing
-so, revealed a more general and more useful set of rules for when wind farms can
-shelter communities. That arc is the paper's strength — lead with it.
+Lead with the multipurpose / public-good thesis, not with a refutation. The
+narrative: wind farms can be dual-purpose (power + community wind reduction); the
+mesoscale study establishes the *engineering rules* for when the wake becomes a
+public good (terrain that holds the wake, winds below cut-out, the high-Ct
+everyday regime) and quantifies the deliverable (uniform city-wide everyday-wind
+reduction, ~6 %/GW). The fjord storm-shield is presented as the initial,
+intuitive candidate form that the physics replaces with better ones — a
+refinement of the thesis, not its collapse. The original draft is cited as
+prior work-in-progress, superseded.
+
+## Process note
+make_wes_paper.py is gitignored (generator), so preserve the prior draft as a
+local copy (e.g. make_wes_paper_v1_fjordeffect.py) before rewriting toward this
+target; git history of the tracked code already records the evolution.
